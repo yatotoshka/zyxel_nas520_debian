@@ -5,6 +5,18 @@ Description: Modern OS with Kernel 6.6.x optimized for Zyxel NAS520.
 The system boots from an SD Card, ensuring silence (HDD spindown) 
 and rock-solid stability (Real-Time Watchdog).
 
+## 📥 Download Links
+You can download the system image and kernel from the link below:
+
+👉 https://mega.nz/folder/zwIUiaAZ#dWQR1B-A20QjlfZXmADpuQ
+
+### Contents:
+* `NAS520_System_Image.img.gz` - OS for SD Card
+* `uImage` - Kernel for NAND flash
+* `README.txt` - Step-by-step installation guide
+
+
+
 1. DEFAULT CREDENTIALS
 --------------------------------------------------------------------
 System (SSH/Console):
