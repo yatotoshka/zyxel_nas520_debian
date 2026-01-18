@@ -51,6 +51,7 @@ B. Edit /env/config:
    kernel_loc=nand
    kernelimage=uImage
    rootfs_loc=sata
+   
    bootargs="console=ttyS0,115200 root=/dev/sda1 rootwait rw init=/lib/systemd/systemd systemd.unit=multi-user.target cgroup_enable=memory swapaccount=1"
 
 C. CRITICAL: Watchdog Keep-Alive (Barebox level):
