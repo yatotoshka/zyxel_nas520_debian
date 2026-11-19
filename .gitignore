@@ -1,0 +1,11 @@
+# Large binary artifacts (not for git)
+nas520_rootfs.img
+nas520_rootfs.img.gz
+*.img
+*.img.gz
+uImage
+*.bin
+
+# Python bytecode
+__pycache__/
+*.pyc
