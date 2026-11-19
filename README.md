@@ -108,15 +108,20 @@ From the upstream project:
 - **CPU-friendly backups** — raw dumps with `conv=sparse`.
 - **Stability** — read-write enforcement after disk timeouts, action logging.
 
-Optional post-install cleanup (not required to boot):
+Optional post-install cleanup (not required to boot, works on systems that are
+already installed — no re-flash):
 
 ```bash
-sudo sh tools/postinstall.sh
+curl -fsSL https://raw.githubusercontent.com/yatotoshka/zyxel_nas520_debian/main/tools/postinstall.sh -o /tmp/postinstall.sh
+sudo sh /tmp/postinstall.sh --check   # preview
+sudo sh /tmp/postinstall.sh           # apply
 ```
 
 It stops the duplicate watchdog feeder (removes `Device or resource busy`
 spam), masks the never-starting `fancontrol.service`, and prints watchdog,
-temperature and fan state. Safe to re-run.
+temperature and fan state. It is versioned, safe to re-run, records applied
+fixes in `/var/lib/nas520-postinstall/applied.log`, and reverts by restoring
+`nas_keep_alive.sh.orig` plus `systemctl unmask fancontrol`.
 
 ---
 

@@ -734,7 +734,8 @@ sudo mmiotool -r 0x90470058     # 0x05000000
 
 Скрипт лежит в репозитории, безопасен и идемпотентен (можно запускать сколько
 угодно раз). Ничего не требует для загрузки — это мелкие правки «чтобы не
-мешало».
+мешало». Лечит **уже установленную** систему: переустанавливать образ не нужно,
+правки живут в файловой системе SD.
 
 ```bash
 # на ноутбуке
@@ -742,40 +743,63 @@ python3 -m http.server 8000 --directory /srv/tftpboot
 
 # на NAS
 curl -fsSL http://192.168.0.194:8000/postinstall.sh -o /tmp/postinstall.sh
-sudo sh /tmp/postinstall.sh
+sudo sh /tmp/postinstall.sh --check   # посмотреть, что будет сделано
+sudo sh /tmp/postinstall.sh           # применить
 ```
+
+Версия скрипта печатается в первой строке (`nas520 postinstall v1.1.0`),
+применённые шаги пишутся в `/var/lib/nas520-postinstall/applied.log` с версией
+и временем. Это значит, что после обновления скрипта достаточно скачать его
+заново и запустить — новые шаги применятся, старые пропустятся.
 
 Что делает:
 
 1. В `/usr/local/bin/nas_keep_alive.sh` комментирует строку
    `echo . > /dev/watchdog` (делает резервную копию `.orig`), оставляя
-   кормление MCU через `0x904700D0` и перезапускает `nas-watchdog.service`.
+   кормление MCU через `0x904700D0`, и перезапускает `nas-watchdog.service`.
    Результат: в журнале больше нет `Device or resource busy` каждые 5 секунд.
 2. Маскирует `fancontrol.service`, который в этом образе не может запуститься
    (нет `/etc/fancontrol`). Если `/etc/fancontrol` есть — не трогает.
 3. Печатает состояние: узлы watchdog, `/proc/mcu_wdt`, статусы юнитов,
    температуру (`i2cget 0 0x0a 0x07`) и текущий ШИМ вентилятора.
 
-Проверенный вывод:
+Проверенный вывод (первый запуск после отката правок):
 
 ```text
-== 1. watchdog keep-alive ==
-   patched /usr/local/bin/nas_keep_alive.sh (backup: …orig)
-== 2. fancontrol ==
-   masked fancontrol.service (no /etc/fancontrol; fan is driven by the SoC PWM)
-== restarted nas-watchdog.service ==
-== 3. state ==
+nas520 postinstall v1.1.0 (apply mode)
+== 1/2 watchdog keep-alive ==
+   comment out 'echo . > /dev/watchdog' in /usr/local/bin/nas_keep_alive.sh
+   restarted nas-watchdog.service
+== 2/2 fancontrol ==
+   disable and mask fancontrol.service (no /etc/fancontrol; fan runs from the SoC PWM)
+== state ==
    watchdog devices : /dev/watchdog /dev/watchdog0
    /proc/mcu_wdt    : 1 (1 = MCU watchdog stopped)
    watchdog.service    : active
    nas-watchdog.service: active
    fancontrol.service  : inactive
-   CPU temperature  : 31 C
+   CPU temperature  : 28 C
    fan PWM 0x9045802C: 0x000005dc
+
+applied by this script:
+nas_keep_alive.sh: drop duplicate /dev/watchdog feeder	v1.1.0	2026-11-19T04:00:52Z
+fancontrol.service: masked (no /etc/fancontrol)	v1.1.0	2026-11-19T04:01:11Z
+
+done.
 ```
 
+Повторный запуск:
+
+```text
+   already done: watchdog feeder patched
+   already done: fancontrol.service masked
+```
+
+`--check` (он же `--dry-run`) ничего не меняет, только печатает `would …`.
+
 Откат: вернуть `nas_keep_alive.sh.orig` и выполнить
-`sudo systemctl unmask fancontrol`.
+`sudo systemctl unmask fancontrol` (при желании — `rm -rf
+/var/lib/nas520-postinstall`).
 
 ### 10.2 Проверки после установки
 

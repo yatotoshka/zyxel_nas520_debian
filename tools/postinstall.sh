@@ -1,59 +1,103 @@
 #!/bin/sh
-# NAS520 post-install tweaks for the Debian 11 image.
+# NAS520 post-install fixes for the Debian 11 image.
 #
-# Safe to run more than once. Run as root:
+# Version: 1.1.0
 #
-#     sudo ./postinstall.sh
+# Changelog:
+#   1.1.0  named steps, --check (dry run), version, applied-fixes log
+#   1.0.0  first release: duplicate watchdog feeder, fancontrol mask, state
 #
-# What it does:
-#   1. stops nas_keep_alive.sh from fighting watchdog.service for /dev/watchdog
-#      (the SoC watchdog is already fed by /sbin/watchdog; the script keeps
-#      petting the external MCU through 0x904700D0)
-#   2. masks fancontrol.service, which can never start without /etc/fancontrol
-#   3. prints the state of both watchdogs, the fan and the CPU temperature
+# Usage:
+#     sudo ./postinstall.sh            apply fixes (safe to re-run)
+#     sudo ./postinstall.sh --check    show what would change, change nothing
 #
-# Nothing here is required for the system to boot; these are cosmetic and
-# reliability fixes. Undo by restoring the *.orig backup and running
-# "systemctl unmask fancontrol".
+# What it fixes:
+#   1. nas_keep_alive.sh fights watchdog.service for /dev/watchdog on every
+#      loop, which spams "Device or resource busy" in the journal. The MCU is
+#      still petted through 0x904700D0, so only the duplicate line is removed.
+#   2. fancontrol.service is enabled but can never start without
+#      /etc/fancontrol, so it is disabled and masked.
+#
+# Undo:
+#   restore /usr/local/bin/nas_keep_alive.sh.orig and run
+#   "sudo systemctl unmask fancontrol".
 
 set -u
 
+VERSION=1.1.0
+STATE_DIR=/var/lib/nas520-postinstall
+STATE_FILE=$STATE_DIR/applied.log
 KEEP=/usr/local/bin/nas_keep_alive.sh
-changed=0
+FANUNIT=fancontrol.service
 
-if [ "$(id -u)" != "0" ]; then
-    echo "error: run this script as root (sudo $0)" >&2
+MODE=apply
+case "${1:-}" in
+    --check|--dry-run|-n)
+        MODE=check
+        ;;
+    --help|-h)
+        echo "usage: sudo $0 [--check|--dry-run]"
+        echo "  no option   apply fixes (safe to re-run)"
+        echo "  --check     show what would change and exit"
+        exit 0
+        ;;
+    '')
+        ;;
+    *)
+        echo "postinstall: unknown option '$1' (try --help)" >&2
+        exit 2
+        ;;
+esac
+
+say()     { printf '%s\n' "$*"; }
+step()    { printf '== %s ==\n' "$*"; }
+act()     { if [ "$MODE" = check ]; then printf '   would %s\n' "$*"; else printf '   %s\n' "$*"; fi; }
+already() { printf '   already done: %s\n' "$*"; }
+
+record() {
+    [ "$MODE" = check ] && return 0
+    mkdir -p "$STATE_DIR" 2>/dev/null || return 0
+    printf '%s\t%s\t%s\n' "$1" "v$VERSION" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >>"$STATE_FILE"
+}
+
+if [ "$MODE" = apply ] && [ "$(id -u)" != 0 ]; then
+    echo "error: run as root (sudo $0)" >&2
     exit 1
 fi
 
-echo "== 1. watchdog keep-alive =="
-if [ -f "$KEEP" ] && grep -q '^[[:space:]]*echo \. > /dev/watchdog' "$KEEP"; then
-    [ -f "$KEEP.orig" ] || cp -a "$KEEP" "$KEEP.orig"
-    sed -i 's|^\([[:space:]]*\)echo \. > /dev/watchdog.*|\1# /dev/watchdog (SoC WDT) is fed by watchdog.service;|' "$KEEP"
-    echo "   patched $KEEP (backup: $KEEP.orig)"
-    changed=1
-else
-    echo "   nothing to do (already patched or file missing)"
-fi
+say "nas520 postinstall v$VERSION ($MODE mode)"
 
-echo "== 2. fancontrol =="
-if [ -e /etc/fancontrol ]; then
-    echo "   /etc/fancontrol exists, leaving fancontrol.service alone"
-else
-    if systemctl is-enabled --quiet fancontrol.service 2>/dev/null; then
-        systemctl disable --now fancontrol.service >/dev/null 2>&1 || true
-        changed=1
+step "1/2 watchdog keep-alive"
+if [ ! -f "$KEEP" ]; then
+    say "   $KEEP not found, skipping"
+elif grep -q '^[[:space:]]*echo \. > /dev/watchdog' "$KEEP"; then
+    act "comment out 'echo . > /dev/watchdog' in $KEEP"
+    if [ "$MODE" = apply ]; then
+        [ -f "$KEEP.orig" ] || cp -a "$KEEP" "$KEEP.orig"
+        sed -i 's|^\([[:space:]]*\)echo \. > /dev/watchdog.*|\1# /dev/watchdog (SoC WDT) is fed by watchdog.service;|' "$KEEP"
+        record "nas_keep_alive.sh: drop duplicate /dev/watchdog feeder"
+        systemctl restart nas-watchdog.service >/dev/null 2>&1 || true
+        say "   restarted nas-watchdog.service"
     fi
-    systemctl mask fancontrol.service >/dev/null 2>&1 || true
-    echo "   masked fancontrol.service (no /etc/fancontrol; fan is driven by the SoC PWM)"
+else
+    already "watchdog feeder patched"
 fi
 
-if [ "$changed" = "1" ] && systemctl is-active --quiet nas-watchdog.service 2>/dev/null; then
-    systemctl restart nas-watchdog.service >/dev/null 2>&1 || true
-    echo "== restarted nas-watchdog.service =="
+step "2/2 fancontrol"
+if [ -e /etc/fancontrol ]; then
+    say "   /etc/fancontrol exists, leaving $FANUNIT alone"
+elif [ "$(systemctl is-enabled "$FANUNIT" 2>/dev/null || true)" = masked ]; then
+    already "$FANUNIT masked"
+else
+    act "disable and mask $FANUNIT (no /etc/fancontrol; fan runs from the SoC PWM)"
+    if [ "$MODE" = apply ]; then
+        systemctl disable --now "$FANUNIT" >/dev/null 2>&1 || true
+        systemctl mask "$FANUNIT" >/dev/null 2>&1 || true
+        record "$FANUNIT: masked (no /etc/fancontrol)"
+    fi
 fi
 
-echo "== 3. state =="
+step "state"
 printf '   watchdog devices : '
 ls /dev/watchdog* 2>/dev/null | tr '\n' ' '
 echo
@@ -66,10 +110,26 @@ for u in watchdog nas-watchdog fancontrol; do
 done
 if command -v i2cget >/dev/null 2>&1; then
     t=$(i2cget -y 0 0x0a 0x07 2>/dev/null || true)
-    [ -n "$t" ] && printf '   CPU temperature  : %d C\n' "$((t))"
+    if [ -n "$t" ]; then
+        printf '   CPU temperature  : %d C\n' "$((t))"
+    fi
 fi
 if command -v mmiotool >/dev/null 2>&1; then
-    printf '   fan PWM 0x9045802C: %s\n' "$(mmiotool -r 0x9045802C 2>/dev/null | sed 's/.*: //')"
+    pwm=$(mmiotool -r 0x9045802C 2>/dev/null | sed 's/.*: //')
+    if [ -n "$pwm" ]; then
+        printf '   fan PWM 0x9045802C: %s\n' "$pwm"
+    fi
 fi
+
+if [ -s "$STATE_FILE" ]; then
+    echo
+    say "applied by this script:"
+    cat "$STATE_FILE"
+fi
+
 echo
-echo "done."
+if [ "$MODE" = check ]; then
+    say "check mode: nothing was changed."
+else
+    say "done."
+fi
