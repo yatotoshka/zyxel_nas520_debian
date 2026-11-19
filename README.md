@@ -11,6 +11,10 @@ SD card as root filesystem.
 > The full, detailed guide is in **[INSTALL_GUIDE.md](INSTALL_GUIDE.md)**
 > (Russian: flash layout, dumps, TFTP, barebox env, watchdog, fan, rollback,
 > troubleshooting).
+>
+> Upgrade of an installed system to Debian 12 and 13 is covered in
+> **[UPGRADE_GUIDE.md](UPGRADE_GUIDE.md)** (also Russian). The upgrade keeps
+> the NAND kernel untouched and changes only the userspace on the SD card.
 
 ---
 
@@ -27,6 +31,8 @@ Everything below was tested on a real NAS520:
 | barebox env edited (`rootfs_loc=sata`, `root=/dev/sda`, `rootwait`) | ✅ done |
 | Unattended boot after `reset` | ✅ done |
 | Both watchdogs, fan and temperature | ✅ checked |
+| Upgrade bullseye → bookworm → trixie in place | ✅ done (19.11.2026) |
+| Cockpit 337 + 45Drives 4.6.4 / 0.5.14 / 0.1.14 on trixie | ✅ done |
 
 `uloader`, `barebox`, `config`, `kernel1`, `rootfs1`, `rootfs2` and `reserved`
 are **not** modified. Only `kernel2` and the `env` partition differ from stock.
@@ -87,6 +93,26 @@ console=ttyS0,115200n8 init=/etc/preinit  ip=dhcp root=/dev/sda \
 
 ---
 
+## Upgrading an installed system
+
+Already running the image and want Debian 12 or 13 with the same kernel in
+NAND? Use **[UPGRADE_GUIDE.md](UPGRADE_GUIDE.md)**. Short version:
+
+```bash
+# on the NAS, as root
+# 0. take a full SD image from a laptop first (dd | zstd)
+sudo sh /tmp/bullseye-cleanup.sh
+# point /etc/apt/sources.list at bookworm, then:
+sudo nohup sh /tmp/dist-upgrade.sh bookworm >/dev/null 2>&1 &
+# reboot, check, switch sources to trixie, run it again
+```
+
+Pitfalls met on real hardware (SSH `AllowGroups`, `wd_keepalive` vs
+`watchdog`, `smartd` with no disks, OMV `monit` leftovers, 45Drives packages
+for armhf) are documented there with fixes.
+
+---
+
 ## Default credentials
 
 | | |
@@ -131,6 +157,11 @@ fixes in `/var/lib/nas520-postinstall/applied.log`, and reverts by restoring
 |------|---------|
 | `README.md` | this file |
 | `INSTALL_GUIDE.md` | complete Russian guide: dumps, flashing, env, rollback |
+| `UPGRADE_GUIDE.md` | Russian guide: bullseye → bookworm → trixie, in place |
+| `tools/bullseye-cleanup.sh` | removes OMV/PHP/Salt/nginx and the 3.2 kernel |
+| `tools/dist-upgrade.sh` | unattended release upgrade with logging |
+| `tools/post-upgrade-check.sh` | read-only health check after a release step |
+| `tools/omv-cleanup.sh` | removes OMV leftovers (`monit`, `folder2ram`, cron) |
 | `tools/postinstall.sh` | optional post-install tweaks, idempotent |
 | `tools/envfs.py` | optional extract/build of the barebox `env` image |
 | `.gitignore` | images and dumps are not committed |
